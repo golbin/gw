@@ -1,0 +1,7 @@
+target/
+.worktrees/
+.gw/meta.json
+.gw/locks/
+.DS_Store
+*.log
+*.tmp

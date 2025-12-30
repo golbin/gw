@@ -1,0 +1,197 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_macos:
+        description: "Build macOS targets"
+        required: true
+        default: true
+        type: boolean
+      build_linux:
+        description: "Build Linux targets"
+        required: true
+        default: true
+        type: boolean
+      build_windows:
+        description: "Build Windows targets"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            platform: macos
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            platform: macos
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            platform: linux
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            platform: linux
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            platform: windows
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ (matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux) || (matrix.platform == 'windows' && inputs.build_windows) }}
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ (matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux) || (matrix.platform == 'windows' && inputs.build_windows) }}
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install Linux aarch64 linker
+        if: ${{ matrix.platform == 'linux' && matrix.target == 'aarch64-unknown-linux-gnu' && inputs.build_linux }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+      - name: Build
+        if: ${{ (matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux) || (matrix.platform == 'windows' && inputs.build_windows) }}
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Archive (unix)
+        if: ${{ (runner.os != 'Windows') && ((matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux)) }}
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar -czf gw-${GITHUB_REF_NAME}-${{ matrix.target }}.tar.gz gw
+      - name: Archive (windows)
+        if: ${{ (runner.os == 'Windows') && (matrix.platform == 'windows' && inputs.build_windows) }}
+        run: |
+          cd target/${{ matrix.target }}/release
+          Compress-Archive -Path gw.exe -DestinationPath gw-${env:GITHUB_REF_NAME}-${{ matrix.target }}.zip
+      - name: Checksums
+        if: ${{ (runner.os != 'Windows') && ((matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux)) }}
+        run: |
+          cd target/${{ matrix.target }}/release
+          shasum -a 256 gw-${GITHUB_REF_NAME}-${{ matrix.target }}.* > SHA256SUMS
+      - name: Checksums (windows)
+        if: ${{ (runner.os == 'Windows') && (matrix.platform == 'windows' && inputs.build_windows) }}
+        run: |
+          cd target/${{ matrix.target }}/release
+          $file = "gw-${env:GITHUB_REF_NAME}-${{ matrix.target }}.zip"
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
+          "$hash  $file" | Out-File -Encoding ASCII SHA256SUMS
+      - name: Upload artifact
+        if: ${{ (matrix.platform == 'macos' && inputs.build_macos) || (matrix.platform == 'linux' && inputs.build_linux) || (matrix.platform == 'windows' && inputs.build_windows) }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gw-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ inputs.build_macos && inputs.build_linux && inputs.build_windows }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+      - name: Assemble SHA256SUMS
+        run: |
+          find dist -name 'SHA256SUMS' -print0 | xargs -0 cat > SHA256SUMS
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/**/gw-*.tar.gz
+            dist/**/gw-*.zip
+            SHA256SUMS
+
+  update-homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ inputs.build_macos && inputs.build_linux && inputs.build_windows }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: golbin/homebrew-tap
+          token: ${{ secrets.TAP_PUSH_TOKEN }}
+          path: tap
+      - name: Update formula
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          URL="https://github.com/golbin/gw/releases/download/${VERSION}/gw-${VERSION}-x86_64-apple-darwin.tar.gz"
+          SHA=$(curl -fsSL "https://github.com/golbin/gw/releases/download/${VERSION}/SHA256SUMS" | grep "gw-${VERSION}-x86_64-apple-darwin.tar.gz" | awk '{print $1}')
+          mkdir -p tap/Formula
+          if [ ! -f tap/Formula/gw.rb ]; then
+            printf "%s\n" \
+              "class Gw < Formula" \
+              "  desc \"git worktree helper\"" \
+              "  homepage \"https://github.com/golbin/gw\"" \
+              "  version \"${VERSION#v}\"" \
+              "  url \"${URL}\"" \
+              "  sha256 \"${SHA}\"" \
+              "" \
+              "  def install" \
+              "    bin.install \"gw\"" \
+              "  end" \
+              "end" > tap/Formula/gw.rb
+          else
+            sed -i.bak -E "s|version \".*\"|version \"${VERSION#v}\"|" tap/Formula/gw.rb
+            sed -i.bak -E "s|url \".*\"|url \"${URL}\"|" tap/Formula/gw.rb
+            sed -i.bak -E "s|sha256 \".*\"|sha256 \"${SHA}\"|" tap/Formula/gw.rb
+          fi
+      - name: Commit and push
+        run: |
+          cd tap
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add Formula/gw.rb
+          git commit -m "gw ${GITHUB_REF_NAME}"
+          git push
+
+  update-scoop:
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ inputs.build_macos && inputs.build_linux && inputs.build_windows }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout bucket
+        uses: actions/checkout@v4
+        with:
+          repository: golbin/scoop-bucket
+          token: ${{ secrets.SCOOP_PUSH_TOKEN }}
+          path: bucket
+      - name: Update manifest
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          URL="https://github.com/golbin/gw/releases/download/${VERSION}/gw-${VERSION}-x86_64-pc-windows-msvc.zip"
+          SHA=$(curl -fsSL "https://github.com/golbin/gw/releases/download/${VERSION}/SHA256SUMS" | grep "gw-${VERSION}-x86_64-pc-windows-msvc.zip" | awk '{print $1}')
+          mkdir -p bucket/bucket
+          if [ ! -f bucket/bucket/gw.json ]; then
+            printf "%s\n" \
+              "{" \
+              "  \"version\": \"${VERSION#v}\"," \
+              "  \"description\": \"git worktree helper\"," \
+              "  \"homepage\": \"https://github.com/golbin/gw\"," \
+              "  \"license\": \"MIT\"," \
+              "  \"url\": \"${URL}\"," \
+              "  \"hash\": \"${SHA}\"," \
+              "  \"bin\": \"gw.exe\"" \
+              "}" > bucket/bucket/gw.json
+          else
+            jq ".version=\"${VERSION#v}\" | .url=\"${URL}\" | .hash=\"${SHA}\"" bucket/bucket/gw.json > bucket/bucket/gw.json.tmp
+            mv bucket/bucket/gw.json.tmp bucket/bucket/gw.json
+          fi
+      - name: Commit and push
+        run: |
+          cd bucket
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add bucket/gw.json
+          git commit -m "gw ${GITHUB_REF_NAME}"
+          git push
