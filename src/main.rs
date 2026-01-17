@@ -86,6 +86,7 @@ fn run() -> Result<()> {
         Commands::Unlock(args) => cmd::unlock(&ctx, args),
         Commands::Gc(args) => cmd::gc(&ctx, args),
         Commands::Cd(args) => cmd::cd(&ctx, args),
+        Commands::Use(args) => cmd::use_cmd(&ctx, args),
         Commands::Exec(args) => cmd::exec_cmd(&ctx, args),
         Commands::Completion(args) => cmd::completion(args),
         Commands::ShellInit(args) => cmd::shell_init(args),

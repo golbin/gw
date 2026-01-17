@@ -44,6 +44,8 @@ pub enum Commands {
     Gc(GcArgs),
     #[command(visible_alias = "c")]
     Cd(CdArgs),
+    #[command(visible_alias = "u")]
+    Use(AddArgs),
     #[command(visible_alias = "x")]
     Exec(ExecArgs),
     Completion(CompletionArgs),

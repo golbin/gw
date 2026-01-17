@@ -66,6 +66,27 @@ pub fn add(ctx: &Context, args: AddArgs) -> Result<()> {
     Ok(())
 }
 
+pub fn use_cmd(ctx: &Context, args: AddArgs) -> Result<()> {
+    let worktrees_dir = ctx.repo_root.join(ctx.config.worktrees_dir());
+    let name = args.name.clone();
+    let path = args
+        .path
+        .clone()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| worktrees_dir.join(&name));
+
+    // add 로직을 quiet 모드로 실행 (경로만 출력하기 위해)
+    let quiet_ctx = Context {
+        quiet: true,
+        ..ctx.clone()
+    };
+    add(&quiet_ctx, args)?;
+
+    // 성공 시 경로만 stdout에 출력 (셸 통합이 cd 수행)
+    println!("{}", path.display());
+    Ok(())
+}
+
 pub fn del(ctx: &Context, args: DelArgs) -> Result<()> {
     let name = args.name;
     if is_locked(&ctx.repo_root, &name) {
@@ -886,6 +907,12 @@ fn bash_init() -> String {
         "  if [ \"$1\" = \"cd\" ]; then",
         "    shift",
         "    cd \"$(command gw cd \"$@\")\"",
+        "  elif [ \"$1\" = \"use\" ] || [ \"$1\" = \"u\" ]; then",
+        "    local output",
+        "    output=$(command gw \"$@\")",
+        "    if [ $? -eq 0 ] && [ -n \"$output\" ]; then",
+        "      cd \"$output\"",
+        "    fi",
         "  else",
         "    command gw \"$@\"",
         "  fi",
@@ -901,6 +928,11 @@ fn fish_init() -> String {
         "  if test (count $argv) -ge 1; and test $argv[1] = \"cd\"",
         "    set -e argv[1]",
         "    cd (command gw cd $argv)",
+        "  else if test (count $argv) -ge 1; and begin test $argv[1] = \"use\"; or test $argv[1] = \"u\"; end",
+        "    set -l output (command gw $argv)",
+        "    if test $status -eq 0; and test -n \"$output\"",
+        "      cd $output",
+        "    end",
         "  else",
         "    command gw $argv",
         "  end",
@@ -916,7 +948,12 @@ fn powershell_init() -> String {
         "  param([Parameter(ValueFromRemainingArguments=$true)] $Args)",
         "  if ($Args.Count -gt 0 -and $Args[0] -eq 'cd') {",
         "    $target = $Args[1]",
-        "    Set-Location (gw cd $target)",
+        "    Set-Location (gw.exe cd $target)",
+        "  } elseif ($Args.Count -gt 0 -and ($Args[0] -eq 'use' -or $Args[0] -eq 'u')) {",
+        "    $output = & gw.exe @Args",
+        "    if ($LASTEXITCODE -eq 0 -and $output) {",
+        "      Set-Location $output",
+        "    }",
         "  } else {",
         "    & gw.exe @Args",
         "  }",
