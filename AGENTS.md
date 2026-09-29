@@ -19,6 +19,7 @@
 
 - Use standard Rust formatting: 4-space indentation, snake_case for functions/modules, PascalCase for types.
 - Keep modules small and focused; place CLI parsing in `src/cli.rs` and command logic in `src/cmd/`.
+- For changed code, keep files ≤300 LOC, functions ≤50 LOC, parameters ≤5, and cyclomatic complexity ≤10; split by responsibility without unrelated cleanup.
 - Prefer clear, descriptive names that mirror CLI verbs (e.g., `ps`, `exec`).
 - Run `cargo fmt` when touching Rust files if rustfmt is available.
 
