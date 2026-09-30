@@ -30,8 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/golbin/gw/main/install.sh | bash
 ## Quick start
 
 ```bash
-gw add demo
-gw cd demo
+gw use demo        # create worktree and cd into it
 touch demo.md
 gw status
 gw apply demo
@@ -69,6 +68,7 @@ This table is the fastest way to learn the core commands, shortcuts, and aliases
 | Command                   | Alias             | Shortcut               | Description                        |
 | ------------------------- | ----------------- | ---------------------- | ---------------------------------- |
 | `gw add <name>`           | `gw new <name>`   | `gw a <name>`          | create worktree                    |
+| `gw use <name>`           |                   | `gw u <name>`          | create worktree and cd into it     |
 | `gw del <name>`           | `gw rm <name>`    | `gw d <name>`          | remove worktree                    |
 | `gw list`                 | `gw ls`           |                        | list worktrees                     |
 | `gw status`               |                   | `gw st`                | status snapshot                    |
@@ -108,6 +108,20 @@ Options:
 -B, --branch <branch>  branch name to create/use (default: wt/<name>)
 --path <dir>           worktree path (default: .worktrees/<name>)
 ```
+
+### gw use <name>
+
+Create a worktree and change into it. Combines `gw add` and `gw cd`.
+
+Options (same as `gw add`):
+
+```
+-b, --base <branch>    base branch (auto if omitted)
+-B, --branch <branch>  branch name to create/use (default: wt/<name>)
+--path <dir>           worktree path (default: .worktrees/<name>)
+```
+
+Requires shell integration (`gw shell-init --install`).
 
 ### gw del <name>
 
